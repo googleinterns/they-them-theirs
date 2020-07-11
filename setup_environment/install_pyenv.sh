@@ -9,7 +9,7 @@ echo "Installing pyenv..."
 curl https://pyenv.run | bash
 
 
-echo '
+echo "Configuring bashrc..."
 export PATH="$HOME/.pyenv/bin:$PATH"
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"' >> ~/.bashrc
