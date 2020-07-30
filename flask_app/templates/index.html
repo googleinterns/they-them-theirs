@@ -1,0 +1,40 @@
+{% extends "bootstrap/base.html" %}
+
+{% block scripts %}
+{{ super() }}
+	<link rel= "stylesheet" type= "text/css" href= "{{ url_for('static',filename='style.css') }}">
+
+	<script src="{{url_for('static', filename='script.js')}}"></script>
+
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+	<script type=text/javascript>
+		$(function() {
+		  $('a#process_input').bind('click', function() {
+			$.getJSON('/gender_neutral', {
+			  sentence: $('input[name="sentence"]').val(),
+			},
+			function(data) {
+			  $("#original_sentence").text(data.original_sentence);
+			  $("#neutral_sentence").text(data.neutral_sentence);
+			  highlight($("#original_sentence"), $("#neutral_sentence"));
+			});
+			return false;
+		  });
+		});
+	</script>
+{% endblock %}
+
+{% block content %}
+{{ super() }}
+	<div class='container'>
+	<h3>Welcome! The Improved Version of the Gender-Neutral Text Converter</h3>
+		<form id="myForm">
+			<input type=text size=50 name=sentence>
+			<a href=# id=process_input><button class='btn btn-default'>Submit</button></a>
+		</form>
+		<p id=original_sentence></p>
+		<p id=neutral_sentence></p>
+<!--		<script>highlight($("#original_sentence"), $("#neutral_sentence"));</script>-->
+	</div>
+
+{% endblock %}
