@@ -132,7 +132,7 @@ def simple_replace(token):
 
     # use a lookup for direct mappings
     # e.g. he --> they, she --> they, policeman --> police officer
-    elif text.lower() in SIMPLE_REPLACE.keys() and token.pos == PRON:
+    elif text.lower() in SIMPLE_REPLACE.keys():
         replace = SIMPLE_REPLACE[text.lower()]
         return capitalization_helper(original=text,
                                      replacement=replace)
