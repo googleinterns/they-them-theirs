@@ -4,8 +4,8 @@ import torch
 import spacy
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
-from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX, PRON
-from spacy.tokens import Token
+from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX
+from spacy.tokens import Token, Doc
 from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
 from constants import *
 
@@ -103,7 +103,7 @@ def score(sentence: str) -> float:
     return math.exp(loss) / len(tokenize_input)  # normalize perplexity by number of tokens
 
 
-def simple_replace(token):
+def simple_replace(token: Token):
     """
     mainly deals with straightforward cases of pronoun / gendered word replacement using a lookup
     also resolves "her" --> "their" / "them"
@@ -148,7 +148,7 @@ def capitalization_helper(original: str, replacement: str) -> str:
     :return: replacement word matching the capitalization of the original word
     """
     # check for capitalization
-    if original[0].isupper():
+    if original.istitle():
         return replacement.capitalize()
     elif original.isupper():
         return replacement.upper()
@@ -157,7 +157,7 @@ def capitalization_helper(original: str, replacement: str) -> str:
     return replacement
 
 
-def identify_verbs_and_auxiliaries(doc) -> dict:
+def identify_verbs_and_auxiliaries(doc: Doc) -> dict:
     """
     identify the root verbs and their corresponding auxiliaries with 'she' or 'he' as their subject
     :param doc: input Doc object
@@ -236,7 +236,7 @@ def pluralize_verbs(verbs_auxiliaries: dict) -> dict:
     return verbs_replacements
 
 
-def pluralize_single_verb(verb):
+def pluralize_single_verb(verb: Token):
     """
     pluralize a single verb
     :param verb: verb as a SpaCy token
@@ -292,7 +292,7 @@ def pluralize_present_simple(lowercase_verb: str):
     return None
 
 
-def create_new_doc(doc, verbs_replacements: dict):
+def create_new_doc(doc: Doc, verbs_replacements: dict):
     """
     create a new SpaCy doc using the original doc and a mapping of verbs to their replacements
     :param doc: original doc with simple_replace extension (from simple_replace function)
