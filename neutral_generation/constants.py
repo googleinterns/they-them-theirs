@@ -2,8 +2,14 @@
 NON_FUNCTION_PRONOUNS = {  # need to change pronoun based on context
     # one-to-many mapping
     # using dependency parser for "her" --> "their" / "them", so not including "her" here
+
     'his': ['their',  # This is his pen --> This is their pen
             'theirs'],  # This pen is his --> This pen is theirs
+
+    # "(s)he's" can be resolved as either "(s)he is" or "(s)he has"
+    # mapping "(s)he's" instead of operating on individual tokens "(s)he" and "'s"
+    # this is because we use regex to find and replace "'s" before feeding the sentence into LM
+    # searching for "(s)he's" instead of "'s" prevents false positives such as "that's" --> "that're"
     "he's": ["they've",
              "they're"],
     "she's": ["they've",
