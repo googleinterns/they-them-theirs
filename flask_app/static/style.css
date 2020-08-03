@@ -1,0 +1,13 @@
+.added {
+    color: #00af05;
+    text-decoration: underline;
+}
+
+.removed {
+    color: #f10000;
+    text-decoration: underline;
+}
+
+p {
+    font-size: 32px;
+}
