@@ -4,8 +4,9 @@ import torch
 import spacy
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
-from spacy.symbols import nsubj, aux, conj, neg, VERB, AUX
-from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTModel, OpenAIGPTLMHeadModel
+from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX
+from spacy.tokens import Token, Doc
+from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
 from constants import *
 
 nlp = spacy.load("en_core_web_sm")
@@ -16,269 +17,303 @@ model.eval()
 # Load pre-trained model tokenizer (vocabulary)
 tokenizer = OpenAIGPTTokenizer.from_pretrained('openai-gpt')
 
+# direct replacement mapping
+SIMPLE_REPLACE = EASY_PRONOUNS
+SIMPLE_REPLACE.update(GENDERED_TERMS)
 
-def convert(s):
-    # input: SNAPE sentence (meaning 1 entity and 1 gender)
-    # output: sentence in gender-neutral form
 
-    # pluralize verbs: change all verbs in third-person singular to third-person plural
-    auxiliaries = identify_verbs_and_auxiliaries(s)
-    s = pluralize_verbs(s, auxiliaries)
-
-    # use regex to replace pronouns and gendered terms that have a clear mapping
-    SIMPLE_REPLACE = EASY_PRONOUNS
-    SIMPLE_REPLACE.update(GENDERED_TERMS)
-    for p, r in SIMPLE_REPLACE.items():
-        s = regex_token_replace(s, p, r)
+def convert(sentence: str) -> str:
+    """
+    convert a sentence to gender-neutral form
+    :param sentence: sentence meeting SNAPE criteria (meaning 1 entity and 1 gender)
+    :return: sentence in gender-neutral form
+    """
 
     # use a LM to break ties for pronouns when there is a one-to-many mapping
-    for p, choices in NON_FUNCTION_PRONOUNS.items():
-        s = smart_pronoun_replace(s, p, choices)
+    for word, choices in NON_FUNCTION_PRONOUNS.items():
+        sentence = smart_pronoun_replace(sentence, word, choices)
 
-    return s
+    # replace pronouns and gendered terms that have a clear mapping
+    # cannot directly modify "doc" object, so we will instead create a "replacement" attribute
+    # in the end, we will create a new doc from original doc and any replacements
+    Token.set_extension("simple_replace", getter=simple_replace, force=True)
 
+    # Doc is a SpaCy container comprised of a sequence of Token objects
+    doc = nlp(sentence)
 
-def regex_token_replace(s, old, new):
-    # replace occurrences of a token in a string with a new token
-    # TODO: can look into redoing replace_map with SpaCy (they save capitalization as well)
-    replace_map = [[old, new], [capitalize(old), capitalize(new)], [old.upper(), new.upper()]]
+    # create a dictionary mapping verbs in sentence from third-person singular to third-person plural
+    verbs_auxiliaries = identify_verbs_and_auxiliaries(doc=doc)
+    verbs_replacements = pluralize_verbs(verbs_auxiliaries)
 
-    for j in range(len(replace_map)):
-        pattern = re.compile(r'\b{}\b'.format(replace_map[j][0]))
-        # TODO: add an exception to regex replacement when an apostrophe follows the pronoun
-        # e.g. He'shan is a location, but with this rule it would become They'shan
-        s = re.sub(pattern, replace_map[j][1], s)
+    # create a new doc with replacements for pronouns, verbs, and gendered terms
+    new_sentence = create_new_doc(doc, verbs_replacements)
 
-    return s
-
-
-def capitalize(word):
-    return word[0].upper() + word[1:]
+    return new_sentence
 
 
-def smart_pronoun_replace(s, p, choices):
+def smart_pronoun_replace(sentence: str, token: str, choices: list) -> str:
+    """
+    use an LM to choose between multiple options for a replacement (e.g. her --> their / them)
+    :param sentence: input sentence
+    :param token: token with more than one choice for replacement
+    :param choices: the options for replacement
+    :return: the sentence after the LM has chosen the replacement option with lower perplexity
+    """
     # generate all choices, then choose best option using LM (one with lowest perplexity)
-    # TODO: currently uses OpenAI GPT, can try other LMs to see how performance changes
     sentence_scores = dict()
     for choice in choices:
-        new_sentence = regex_token_replace(s, p, new=choice)
-        if s != new_sentence:
+        new_sentence = regex_token_replace(sentence, token, replacement=choice)
+        if sentence != new_sentence:
             new_score = score(new_sentence)
             sentence_scores[new_sentence] = new_score
 
-    if not sentence_scores:   # source pronoun not found in sentence, meaning there are no choices to choose from
-        return s
+    if not sentence_scores:  # source pronoun not found in sentence, meaning there are no choices to choose from
+        return sentence
 
-    print(sentence_scores)
-
-    return min(sentence_scores, key=sentence_scores.get)    # return sentence with lowest score (perplexity)
+    return min(sentence_scores, key=sentence_scores.get)  # return sentence with lowest score (perplexity)
 
 
-def score(sentence):
+def regex_token_replace(sentence: str, token: str, replacement: str) -> str:
+    """
+    replace all occurrences of a target token with its replacement
+    :param sentence: input sentence to be modified
+    :param token: target token to be replaced
+    :param replacement: replacement word for the target token
+    :return: sentence with the all occurrences of the target token substituted by its replacement
+    """
+    replace_map = [[token, replacement], [token.capitalize(), replacement.capitalize()],
+                   [token.upper(), replacement.upper()]]
+
+    for j in range(len(replace_map)):
+        pattern = re.compile(r'\b{}\b'.format(replace_map[j][0]))  # \b indicates a word boundary in regex
+        sentence = re.sub(pattern, replace_map[j][1], sentence)
+
+    return sentence
+
+
+def score(sentence: str) -> float:
+    """
+    score the perplexity of a sentence
+    :param sentence: input sentence
+    :return: perplexity normalized by length of sentence (longer sentences won't have inherently have higher perplexity)
+    """
     tokenize_input = tokenizer.tokenize(sentence)
     tensor_input = torch.tensor([tokenizer.convert_tokens_to_ids(tokenize_input)])
     loss = model(tensor_input, lm_labels=tensor_input)
-    return math.exp(loss) / len(tokenize_input)     # normalize perplexity by number of tokens
+    return math.exp(loss) / len(tokenize_input)  # normalize perplexity by number of tokens
 
 
-def identify_verbs_and_auxiliaries(s):
+def simple_replace(token: Token):
     """
-    :param s: input sentence
-    :return: dictionary of verbs and list of auxiliaries (if any) with 'she' or 'he' as their subject
+    mainly deals with straightforward cases of pronoun / gendered word replacement using a lookup
+    also resolves "her" --> "their" / "them"
+    :param token: SpaCy token
+    :return: the token's text replacement (if it exists) as a string.
     """
+    text = token.text
+
+    # use dependency parser to resolve "her" --> "their" / "them"
+    # if "her" is a possessive pronoun, then its replacement should be "their"
+    # if "her" is an object, then its replacement should be "them"
+    if text.lower() == 'her':
+        is_obj = (token.dep == obj or
+                  token.dep == iobj or
+                  token.dep == pobj or
+                  token.dep == dobj or
+                  token.dep_ == "dative")
+        if token.dep == poss:
+            return capitalization_helper(original=text,
+                                         replacement='their')
+        elif is_obj:
+            return capitalization_helper(original=text,
+                                         replacement='them')
+        else:
+            return None
+
+    # use a lookup for direct mappings
+    # e.g. he --> they, she --> they, policeman --> police officer
+    elif text.lower() in SIMPLE_REPLACE.keys():
+        replace = SIMPLE_REPLACE[text.lower()]
+        return capitalization_helper(original=text,
+                                     replacement=replace)
+
+    return None
+
+
+def capitalization_helper(original: str, replacement: str) -> str:
+    """
+    helper function to return appropriate capitalization
+    :param original: original word from the sentence
+    :param replacement: replacement for the given word
+    :return: replacement word matching the capitalization of the original word
+    """
+    # check for capitalization
+    if original.istitle():
+        return replacement.capitalize()
+    elif original.isupper():
+        return replacement.upper()
+
+    # otherwise, return the default replacement
+    return replacement
+
+
+def identify_verbs_and_auxiliaries(doc: Doc) -> dict:
+    """
+    identify the root verbs and their corresponding auxiliaries with 'she' or 'he' as their subject
+    :param doc: input Doc object
+    :return: dictionary with verbs (SpaCy Token) as keys, auxiliaries as values (SpaCy Token)
+    """
+    # no need to include uppercase pronouns bc searching for potential_subject checks lower-cased version of each token
     SUBJECT_PRONOUNS = ['she', 'he']
-    doc = nlp(s)
 
     # identify all verbs
     verbs = set()
     # this deals with repeating verbs, e.g. "He sings and sings."
-    #   because verb with same text will have different position (makes them unique)
+    # verb Token with same text will have different position (makes them unique)
     for possible_subject in doc:
         is_subject = (
-            possible_subject.dep == nsubj and                   # current token is a subject
-            # head of current token is a verb
-            (possible_subject.head.pos == VERB or possible_subject.head.pos == AUX) and
-            possible_subject.text.lower() in SUBJECT_PRONOUNS   # current token is either she / he
+                (possible_subject.dep == nsubj or
+                 possible_subject.dep == nsubjpass) and  # current token is a subject
+                # head of current token is a verb
+                (possible_subject.head.pos == VERB or possible_subject.head.pos == AUX) and
+                possible_subject.text.lower() in SUBJECT_PRONOUNS  # current token is either she / he
         )
         if is_subject:
             verbs.add(possible_subject.head)
 
     # identify all conjuncts and add them to set of verbs
     # e.g. he dances and prances --> prances would be a conjunct
-    # TODO: understand all English labels of dependency parse better
     for possible_conjunct in doc:
         is_conjunct = (
-            possible_conjunct.dep == conj and           # current token is a conjunct
-            # removing the line below, can have a conjunct with an auxiliary verb, e.g. "He was angry and ran away."
-            # possible_conjunct.head.pos == VERB and      # head of current token is a verb
-            possible_conjunct.head in verbs             # the subject of that verb is she / he
+                possible_conjunct.dep == conj and  # current token is a conjunct
+                possible_conjunct.head in verbs  # the subject of that verb is she / he
         )
         if is_conjunct:
             verbs.add(possible_conjunct)
 
-    # print('verbs: ', verbs)
-
-    auxiliaries = dict()
+    verbs_auxiliaries = dict()
     for verb in verbs:
-        auxiliaries[verb] = list()
+        verbs_auxiliaries[verb] = list()
     for possible_aux in doc:
         is_auxiliary = (
-            # current token is an auxiliary verb or negation (not)
-            (possible_aux.dep == aux or possible_aux.dep == neg) and
-            possible_aux.head.pos == VERB and       # head of current token is a verb
-            possible_aux.head in verbs              # the subject of that verb is she / he
+                possible_aux.pos == AUX and  # current token is an auxiliary verb
+                possible_aux.head in verbs  # the subject of that verb is she / he
         )
         if is_auxiliary:
             verb = possible_aux.head
-            auxiliaries[verb].append(possible_aux)
+            verbs_auxiliaries[verb].append(possible_aux)
 
-    print('verbs: ', auxiliaries)
-
-    return auxiliaries
+    return verbs_auxiliaries
 
 
-def pluralize_verbs(s, auxiliaries):
+def pluralize_verbs(verbs_auxiliaries: dict) -> dict:
     """
-    :param s: input sentence
-    :param auxiliaries: dictionary of verbs and list of auxiliaries (if any) to be pluralized
-    :return: sentence with plural form of verbs
+    map each verb and auxiliary to its plural form
+    :param verbs_auxiliaries: dictionary with verbs (SpaCy Token) as keys, auxiliaries as values (SpaCy Token)
+    :return: dictionary with verbs and auxiliaries (SpaCy Token) as keys, plural form as values (str or None)
     """
+    verbs_replacements = dict()
 
-    # do_not_change includes 7 tenses in total:
-    #   the 4 future tenses, the 2 past perfect tenses, and the past simple
-    do_not_change = ['past simple', 'past perfect', 'future']
+    for verb, auxiliaries in verbs_auxiliaries.items():
+        # verb has no auxiliaries
+        if not auxiliaries:
+            verbs_replacements[verb] = pluralize_single_verb(verb)
 
-    # rule_change includes 4 tenses in total:
-    #   the present continuous, the 2 present perfect tenses, and the past continuous
-    rule_change = ['present continuous', 'present perfect', 'past continuous']
+        # there are auxiliary verbs
+        else:
+            verbs_replacements[verb] = None  # do not need to pluralize root verb if there are auxiliaries
 
-    # TODO: categorize tense for "do" verbs
-    verb_tense = dict()
-    for verb, auxiliary_list in auxiliaries.items():
-        auxiliary_text = ' '.join(auxiliary.text for auxiliary in auxiliary_list)
-        full_verb = auxiliary_text + ' ' + verb.text
-        tense = categorize_tense(full_verb, verb, auxiliary_list)
+            # use a lookup to find replacements for auxiliaries
+            for auxiliary in auxiliaries:
+                text = auxiliary.text
+                if text.lower() in IRREGULAR_VERBS.keys():
+                    replacement = IRREGULAR_VERBS[text.lower()]
+                    verbs_replacements[auxiliary] = capitalization_helper(original=text,
+                                                                          replacement=replacement)
+                else:
+                    verbs_replacements[auxiliary] = None
 
-        if tense == 'unknown':
-            print(verb, auxiliary_list, ': unknown')
-
-        verb_tense[verb] = tense
-
-    # using regex to replace verbs
-    # taking advantage of the idea that in SNAPE sentences, all verbs should refer to the same subject
-    for verb, tense in verb_tense.items():
-        if tense in do_not_change:
-            # to my knowledge, the only irregular case is "was" to "were" in past simple
-            # all other tenses in do_not_change would not require a modification to the verb
-            if tense == 'past simple' and verb.text == 'was':
-                s = regex_token_replace(s, 'was', 'were')
-            continue
-        elif tense in rule_change:
-            for singular, plural in RULE_CHANGE_VERBS.items():
-                s = regex_token_replace(s, singular, plural)
-        elif tense == 'present simple':
-            new_verb = pluralize_present_simple(verb.text)
-            s = regex_token_replace(s, verb.text, new_verb)
-
-    return s
+    return verbs_replacements
 
 
-def categorize_tense(full_verb, verb, auxiliary_list):
+def pluralize_single_verb(verb: Token):
     """
-    :param full_verb: auxiliary verbs + root verb as a string
-    :param verb: root verb as a SpaCy token
-    :return: verb tense
+    pluralize a single verb
+    :param verb: verb as a SpaCy token
+    :return: the plural form of the verb as a str, or None if verb doesn't lend itself to pluralization
     """
-    tokens = full_verb.split(' ')
-    num_tokens = len(tokens)
+    verb_text = verb.text
 
-    # present tenses that are easy to categorize with rule-based methods
-    is_present_continuous = (
-        'is' in full_verb and
-        tokens[-1].endswith('ing') and
-        num_tokens >= 2
-    )
-    if is_present_continuous:
-        return 'present continuous'
-
-    is_present_perfect = (
-        'has' in full_verb and
-        num_tokens >= 2
-    )
-    if is_present_perfect:
-        return 'present perfect'
-
-    # past tenses that are easy to categorize with rule-based methods
-    is_past_continuous = (
-        'was' in full_verb and
-        tokens[-1].endswith('ing') and
-        num_tokens >= 2
-    )
-    if is_past_continuous:
-        return 'past continuous'
-
-    is_past_perfect = (
-        'had' in full_verb and
-        num_tokens >= 2
-    )
-    if is_past_perfect:
-        return 'past perfect'
-
-    # all forms of future tense is easy to categorize with rule-based methods
-    is_future = (
-        ('will' in full_verb or 'shall' in full_verb) and
-        num_tokens >= 2
-    )
-    if is_future:
-        return 'future'
-
-    # if verb tense is not any of the above, categorize as either present simple or past simple
-    # check root verb
+    # check verb tense (expect to be either past simple or present simple)
     verb_tag = nlp.vocab.morphology.tag_map[verb.tag_]
-    # TODO: understand verb tag better
-    if 'Tense_pres' in verb_tag.keys():
-        return 'present simple'
 
     if 'Tense_past' in verb_tag.keys():
-        return 'past simple'
+        # was is an irregular past tense verb from third-person singular to third-person plural
+        if verb_text.lower() == 'was':
+            return capitalization_helper(verb_text, 'were')
 
-    # check auxiliary verbs
-    for auxiliary in auxiliary_list:
-        aux_tag = nlp.vocab.morphology.tag_map[auxiliary.tag_]
+        # other past-tense verbs remain the same
+        else:
+            return None
 
-        if 'Tense_pres' in aux_tag.keys():
-            return 'present simple'
-        if 'Tense_past' in aux_tag.keys():
-            return 'past simple'
+    # oftentimes, if there are 2+ verbs in a sentence, each verb after the first (the conjuncts) will be misclassified
+    # the POS of these other verbs are usually misclassified as NOUN
+    # e.g. He dances and prances and sings. --> "prances" and "sings" are conjuncts marked as NOUN (should be VERB)
+    # checking if verb ends with "s" is a band-aid fix
+    elif 'Tense_pres' in verb_tag.keys() or verb.text.endswith('s'):
+        return capitalization_helper(original=verb_text.lower(),
+                                     replacement=pluralize_present_simple(verb_text))
 
-    return 'unknown'
-
-
-def pluralize_present_simple(verb):
-    uppercase = verb == verb.upper()
-    new_verb = pluralize_lowercase_verb(verb.lower())
-    if uppercase:
-        new_verb = new_verb.upper()
-
-    return new_verb
+    return None
 
 
-def pluralize_lowercase_verb(verb):
+def pluralize_present_simple(lowercase_verb: str):
+    """
+    pluralize a third-person singular verb in the present simple tense
+    :param lowercase_verb: original verb (lower-cased)
+    :return: 3rd-person plural verb in the present simple tense
+    """
     # TODO: pluralizing present tense can be tricky.
-    #   Probably a good idea to write a script to test function, can easily get ground truth for evaluation
-    for singular, plural in IRREGULAR_PRESENT_SIMPLE_VERBS.items():
-        if verb == singular:
+    # Probably a good idea to write a script to test function, can easily get ground truth for evaluation
+    for singular, plural in IRREGULAR_VERBS.items():
+        if lowercase_verb == singular:
             return plural
 
-    if verb.endswith('ies'):
-        return verb[:-3] + 'y'
+    if lowercase_verb.endswith('ies'):
+        return lowercase_verb[:-3] + 'y'
 
-    for i in range(len(VERB_ES_SUFFIXES)):
-        suffix = VERB_ES_SUFFIXES[i]
-        if verb.endswith(suffix):
-            return verb[:-2]
+    for suffix in VERB_ES_SUFFIXES:
+        if lowercase_verb.endswith(suffix):
+            return lowercase_verb[:-2]
 
-    if verb.endswith('s'):
-        return verb[:-1]
+    if lowercase_verb.endswith('s'):
+        return lowercase_verb[:-1]
 
-    return verb
+    return None
+
+
+def create_new_doc(doc: Doc, verbs_replacements: dict):
+    """
+    create a new SpaCy doc using the original doc and a mapping of verbs to their replacements
+    :param doc: original doc with simple_replace extension (from simple_replace function)
+    :param verbs_replacements: dictionary mapping verbs and auxiliaries to their replacements
+    :return: the gender-neutral sentence as a SpaCy doc
+    """
+    token_texts = []
+    for token in doc:
+        replace_verb = (token in verbs_replacements.keys() and
+                        verbs_replacements[token])
+
+        if token._.simple_replace:
+            token_texts.append(token._.simple_replace)
+
+        elif replace_verb:
+            token_texts.append(verbs_replacements[token])
+
+        else:
+            token_texts.append(token.text)
+        if token.whitespace_:  # filter out empty strings
+            token_texts.append(token.whitespace_)
+
+    new_sentence = ''.join(token_texts)
+    return new_sentence
