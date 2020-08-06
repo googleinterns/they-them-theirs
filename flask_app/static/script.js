@@ -39,7 +39,7 @@ function highlightDifference(oldElem, newElem) {
     newElem.html(newText);
 }
 
-function get_words(sentence) {
-    // get the alphanumeric characters from a sentence
-    return sentence.text().toLowerCase().match(/\w+/g);
+function get_words(element) {
+    // get the words of a sentence
+    return element.text().split(' ');
 }
