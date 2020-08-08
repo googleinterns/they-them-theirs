@@ -16,7 +16,7 @@
 			function(data) {
 			  $("#original_sentence").text(data.original_sentence);
 			  $("#neutral_sentence").text(data.neutral_sentence);
-			  highlight($("#original_sentence"), $("#neutral_sentence"));
+			  highlightDifference($("#original_sentence"), $("#neutral_sentence"));
 			});
 			return false;
 		  });
@@ -34,7 +34,6 @@
 		</form>
 		<p id=original_sentence></p>
 		<p id=neutral_sentence></p>
-<!--		<script>highlight($("#original_sentence"), $("#neutral_sentence"));</script>-->
 	</div>
 
 {% endblock %}
