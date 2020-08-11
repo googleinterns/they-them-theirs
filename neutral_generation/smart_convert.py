@@ -77,7 +77,8 @@ def smart_pronoun_replace(sentence: str, token: str, choices: list) -> str:
     for choice in choices:
         new_sentence = regex_token_replace(sentence, token, replacement=choice)
         if sentence != new_sentence:
-            new_score = score(new_sentence)
+            new_score = score(sentence=new_sentence,
+                              stride=1)
             sentence_scores[new_sentence] = new_score
 
     if not sentence_scores:  # source pronoun not found in sentence, meaning there are no choices to choose from
@@ -104,22 +105,27 @@ def regex_token_replace(sentence: str, token: str, replacement: str) -> str:
     return sentence
 
 
-def score(sentence: str) -> float:
+def score(sentence: str, stride: int) -> float:
     """
     score the perplexity of a sentence
     :param sentence: input sentence
+    :param stride: calculate perplexity for every {stride} tokens, can trade-off speed for accuracy
     :return: perplexity normalized by length of sentence (longer sentences won't have inherently have higher perplexity)
     """
     encodings = tokenizer(sentence, return_tensors='pt')
-    max_length = model.config.n_positions  # max length for gpt2-large and gpt is 1024
-    num_tokens = encodings.input_ids.size(1)  # usually punctuation will count as separate tokens
 
     # can adjust stride based on size of input
-    # for us, we expect input to be a single sentence, so we set stride to 1
-    # this means we find log prob for each token and then feed them into formula for perplexity
     # if (1) input is longer (e.g. document) or (2) we wish to have faster computation, we can set longer stride
     # reference: https://huggingface.co/transformers/perplexity.html
-    stride = 1
+
+    if stride == 1:  # if stride is 1, just return average log prob of each token (no need to copy and mask)
+        input_ids = encodings.input_ids.to(device)
+        with torch.no_grad():  # don't need gradients for evaluation
+            outputs = model(input_ids, labels=input_ids)
+            return float(torch.exp(outputs[0]))  # outputs[0] is avg log prob
+
+    max_length = model.config.n_positions  # max length for gpt2-large and gpt is 1024
+    num_tokens = encodings.input_ids.size(1)  # usually punctuation will count as separate tokens
 
     # calculate neg log prob for each token given context of previous tokens in the sentence
     # if stride=1, context will be all previous tokens in sentence (assuming # of tokens < max_length)
