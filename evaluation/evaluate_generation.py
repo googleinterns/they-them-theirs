@@ -8,7 +8,7 @@ def generate_outputs(func) -> list:
     :param func: a python function that converts gendered sentences to be gender-neutral
     :return: a list of gender-neutral sentences
     """
-    with open('test_set/source.txt', 'r') as f:
+    with open('./test_set/source.txt', 'r') as f:
         source = f.readlines()
 
     return [func(sentence) for sentence in source]
