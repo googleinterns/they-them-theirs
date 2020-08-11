@@ -1,6 +1,6 @@
 import re
-import math
 import torch
+from string import punctuation
 
 from constants import *
 # direct replacement mapping
@@ -37,6 +37,10 @@ def convert(sentence: str) -> str:
     :param sentence: sentence meeting SNAPE criteria (meaning 1 entity and 1 gender)
     :return: sentence in gender-neutral form
     """
+
+    # check error case when input is a single word and the word is a non function pronoun
+    if sentence.strip(punctuation).strip().lower() in NON_FUNCTION_PRONOUNS.keys():
+        raise ValueError("Input is a pronoun with a one-to-many mapping. Insufficient context.")
 
     # use a LM to break ties for pronouns when there is a one-to-many mapping
     for word, choices in NON_FUNCTION_PRONOUNS.items():
