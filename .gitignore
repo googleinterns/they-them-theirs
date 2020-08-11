@@ -5,6 +5,11 @@ neutral_generation/jewang_neutral_converter.py
 neutral_generation/old_smart_convert.py
 neutral_generation/old_constants.py
 
+evaluation/test_set/old_generation.txt
+evaluation/test_set/jewang_generation.txt
+evaluation/test_set/generation.txt
+evaluation/calculate_metrics.py
+
 .idea
 .DS_Store
 **/__pycache__
