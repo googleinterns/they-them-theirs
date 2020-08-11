@@ -4,6 +4,7 @@ neutral_generation/test_convert.py
 neutral_generation/jewang_neutral_converter.py
 neutral_generation/old_smart_convert.py
 neutral_generation/old_constants.py
+neutral_generation/old_score_smart_convert.py
 
 .idea
 .DS_Store

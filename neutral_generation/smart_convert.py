@@ -1,25 +1,34 @@
 import re
 import math
 import torch
-import spacy
+
+from constants import *
+# direct replacement mapping
+SIMPLE_REPLACE = EASY_PRONOUNS
+SIMPLE_REPLACE.update(GENDERED_TERMS)
+
+# load SpaCy's "en_core_web_sm" model
+# English multi-task CNN trained on OntoNotes
+# Assigns context-specific token vectors, POS tags, dependency parse and named entities
+# https://spacy.io/models/en
+import en_core_web_sm
+nlp = en_core_web_sm.load()
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
 from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX
 from spacy.tokens import Token, Doc
-from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
-from constants import *
 
-nlp = spacy.load("en_core_web_sm")
+# Load pre-trained language model and tokenizer
+# https://huggingface.co/transformers/model_doc/gpt2.html
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
-# Load pre-trained model (weights)
-model = OpenAIGPTLMHeadModel.from_pretrained('openai-gpt')
-model.eval()
-# Load pre-trained model tokenizer (vocabulary)
-tokenizer = OpenAIGPTTokenizer.from_pretrained('openai-gpt')
-
-# direct replacement mapping
-SIMPLE_REPLACE = EASY_PRONOUNS
-SIMPLE_REPLACE.update(GENDERED_TERMS)
+model_id = 'gpt2-large'  # can change to gpt2 if gpt2-large is too big
+model = GPT2LMHeadModel.from_pretrained(model_id).to(device)
+tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
 
 
 def convert(sentence: str) -> str:
@@ -97,10 +106,42 @@ def score(sentence: str) -> float:
     :param sentence: input sentence
     :return: perplexity normalized by length of sentence (longer sentences won't have inherently have higher perplexity)
     """
-    tokenize_input = tokenizer.tokenize(sentence)
-    tensor_input = torch.tensor([tokenizer.convert_tokens_to_ids(tokenize_input)])
-    loss = model(tensor_input, lm_labels=tensor_input)
-    return math.exp(loss) / len(tokenize_input)  # normalize perplexity by number of tokens
+    encodings = tokenizer(sentence, return_tensors='pt')
+    max_length = model.config.n_positions  # max length for gpt2-large and gpt is 1024
+    num_tokens = encodings.input_ids.size(1)  # usually punctuation will count as separate tokens
+
+    # can adjust stride based on size of input
+    # for us, we expect input to be a single sentence, so we set stride to 1
+    # this means we find log likelihood for each token and then feed them into formula for perplexity
+    # if (1) input is longer (e.g. document) or (2) we wish to have faster computation, we can set longer stride
+    # reference: https://huggingface.co/transformers/perplexity.html
+    stride = 1
+
+    # calculate neg log likelihood for each token given context of previous tokens in the sentence
+    # if stride=1, context will be all previous tokens in sentence (assuming # of tokens < max_length)
+    likelihoods = list()
+    for i in range(1, num_tokens, stride):
+        begin_loc = max(i + stride - max_length, 0)
+
+        # model is trained without a token indicating beginning of sentence, so we start calculation at second token
+        # this also means model cannot calculate perplexity for a single token (have added error checking for this case)
+        end_loc = i + stride
+
+        input_ids = encodings.input_ids[:, begin_loc:end_loc].to(device)
+        target_ids = input_ids.clone()
+        target_ids[:, :-stride] = -100  # mask prior tokens (the context) since we only care about current token
+
+        with torch.no_grad():  # don't need gradients for evaluation
+            outputs = model(input_ids, labels=target_ids)
+            log_likelihood = outputs[0] * stride
+
+        likelihoods.append(log_likelihood)
+
+    # formula for perplexity
+    # dividing by (num_tokens - 1) because model does not calculate log likelihood for first token
+    perplexity = torch.exp(torch.stack(likelihoods).sum() / (num_tokens - 1))
+
+    return float(perplexity)
 
 
 def simple_replace(token: Token):
