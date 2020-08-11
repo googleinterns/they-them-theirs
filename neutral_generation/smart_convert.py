@@ -116,14 +116,14 @@ def score(sentence: str) -> float:
 
     # can adjust stride based on size of input
     # for us, we expect input to be a single sentence, so we set stride to 1
-    # this means we find log likelihood for each token and then feed them into formula for perplexity
+    # this means we find log prob for each token and then feed them into formula for perplexity
     # if (1) input is longer (e.g. document) or (2) we wish to have faster computation, we can set longer stride
     # reference: https://huggingface.co/transformers/perplexity.html
     stride = 1
 
-    # calculate neg log likelihood for each token given context of previous tokens in the sentence
+    # calculate neg log prob for each token given context of previous tokens in the sentence
     # if stride=1, context will be all previous tokens in sentence (assuming # of tokens < max_length)
-    likelihoods = list()
+    log_probabilities = list()
     for i in range(1, num_tokens, stride):
         begin_loc = max(i + stride - max_length, 0)
 
@@ -137,13 +137,13 @@ def score(sentence: str) -> float:
 
         with torch.no_grad():  # don't need gradients for evaluation
             outputs = model(input_ids, labels=target_ids)
-            log_likelihood = outputs[0] * stride
+            log_prob = outputs[0] * stride
 
-        likelihoods.append(log_likelihood)
+        log_probabilities.append(log_prob)
 
     # formula for perplexity
-    # dividing by (num_tokens - 1) because model does not calculate log likelihood for first token
-    perplexity = torch.exp(torch.stack(likelihoods).sum() / (num_tokens - 1))
+    # dividing by (num_tokens - 1) because model does not calculate log prob for first token
+    perplexity = torch.exp(torch.stack(log_probabilities).sum() / (num_tokens - 1))
 
     return float(perplexity)
 
