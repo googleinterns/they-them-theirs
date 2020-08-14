@@ -26,7 +26,7 @@ if torch.cuda.is_available():
 else:
     device = 'cpu'
 
-model_id = 'gpt2-large'  # can change to gpt2 if gpt2-large is too big
+model_id = 'gpt2'  # can also change to gpt-2 large if size is not an issue
 model = GPT2LMHeadModel.from_pretrained(model_id).to(device)
 tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
 
@@ -324,8 +324,6 @@ def pluralize_present_simple(lowercase_verb: str):
     :param lowercase_verb: original verb (lower-cased)
     :return: 3rd-person plural verb in the present simple tense
     """
-    # TODO: pluralizing present tense can be tricky.
-    # Probably a good idea to write a script to test function, can easily get ground truth for evaluation
     for singular, plural in IRREGULAR_VERBS.items():
         if lowercase_verb == singular:
             return plural
@@ -333,6 +331,7 @@ def pluralize_present_simple(lowercase_verb: str):
     if lowercase_verb.endswith('ies'):
         return lowercase_verb[:-3] + 'y'
 
+    # -es rule: https://howtospell.co.uk/adding-es-plural-rule
     for suffix in VERB_ES_SUFFIXES:
         if lowercase_verb.endswith(suffix):
             return lowercase_verb[:-2]
@@ -348,7 +347,7 @@ def create_new_doc(doc: Doc, verbs_replacements: dict):
     create a new SpaCy doc using the original doc and a mapping of verbs to their replacements
     :param doc: original doc with simple_replace extension (from simple_replace function)
     :param verbs_replacements: dictionary mapping verbs and auxiliaries to their replacements
-    :return: the gender-neutral sentence as a SpaCy doc
+    :return: the gender-neutral sentence as a str
     """
     token_texts = []
     for token in doc:

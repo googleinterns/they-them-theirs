@@ -61,7 +61,8 @@ IRREGULAR_VERBS = {
     'was': 'were',
     'has': 'have',
     'does': 'do',
-    'goes': 'go'
+    'goes': 'go',
+    'quizzes': 'quiz'  # 1-1-1 doubling rule
 }
 
 VERB_ES_SUFFIXES = ['ses', 'zes', 'xes', 'ches', 'shes']
