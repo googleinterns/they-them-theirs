@@ -4,9 +4,6 @@ import pytest
 import torch
 import math
 
-from spacy.tokens.doc import Doc
-from spacy.tokens.token import Token
-
 from constants import *
 
 # direct replacement mapping
@@ -36,7 +33,7 @@ tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
 
 from smart_convert import convert, smart_pronoun_replace, regex_token_replace, score, simple_replace, \
     capitalization_helper, identify_verbs_and_auxiliaries, pluralize_verbs, pluralize_single_verb, \
-    pluralize_present_simple, create_new_doc
+    pluralize_present_simple
 
 
 class TestConvert:
@@ -66,18 +63,6 @@ class TestConvert:
 
 class TestSmartPronounReplace:
     # test smart_pronoun_replace function to replace pronouns in context
-
-    def test_smart_pronoun_replace_his_1(self):
-        assert smart_pronoun_replace(sentence="This pencil is his.",
-                                     token="his",
-                                     choices=NON_FUNCTION_PRONOUNS['his']) == \
-               "This pencil is theirs."
-
-    def test_smart_pronoun_replace_his_2(self):
-        assert smart_pronoun_replace(sentence="This pencil is his.",
-                                     token="his",
-                                     choices=NON_FUNCTION_PRONOUNS["his"]) == \
-               "This pencil is theirs."
 
     def test_smart_pronoun_replace_shes_1(self):
         assert smart_pronoun_replace(sentence="She's going to the mall.",
