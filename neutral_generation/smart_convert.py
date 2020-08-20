@@ -132,14 +132,13 @@ def simple_replace(token: Token):
 
     # their vs theirs: https://ell.stackexchange.com/questions/18604/how-to-use-their-and-theirs
     if text.lower() == 'his':
-        is_poss = (token.dep == poss and
-                   token.head.pos == NOUN)
-        if is_poss:
-            return capitalization_helper(original=text,
-                                         replacement='their')
-        else:
+        implied_head = (token.head.pos != NOUN)
+        if implied_head:
             return capitalization_helper(original=text,
                                          replacement='theirs')
+        else:
+            return capitalization_helper(original=text,
+                                         replacement='their')
 
     # use a lookup for direct mappings
     # e.g. he --> they, she --> they, policeman --> police officer
