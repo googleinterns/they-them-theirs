@@ -3,6 +3,7 @@ import torch
 from string import punctuation
 
 from constants import *
+
 # direct replacement mapping
 SIMPLE_REPLACE = EASY_PRONOUNS
 SIMPLE_REPLACE.update(GENDERED_TERMS)
@@ -12,6 +13,7 @@ SIMPLE_REPLACE.update(GENDERED_TERMS)
 # Assigns context-specific token vectors, POS tags, dependency parse and named entities
 # https://spacy.io/models/en
 import en_core_web_sm
+
 nlp = en_core_web_sm.load()
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
@@ -21,6 +23,7 @@ from spacy.tokens import Token, Doc
 # Load pre-trained language model and tokenizer
 # https://huggingface.co/transformers/model_doc/gpt2.html
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+
 if torch.cuda.is_available():
     device = 'cuda'
 else:
@@ -105,13 +108,37 @@ def regex_token_replace(sentence: str, token: str, replacement: str) -> str:
     return sentence
 
 
-def score(sentence: str, stride: int) -> float:
+def score(sentence: str, stride: int = 1) -> float:
     """
     score the perplexity of a sentence
     :param sentence: input sentence
-    :param stride: calculate perplexity for every {stride} tokens, can trade-off speed for accuracy
+    :param stride: (optional) calculate perplexity for every {stride} tokens, can trade-off speed for accuracy
     :return: perplexity normalized by length of sentence (longer sentences won't have inherently have higher perplexity)
     """
+    # Tony's note about the sliding window implementation / stride parameter (08.21.2020):
+
+    # By default, the stride parameter is set to 1. This means that we find the average log probability of each token
+    # after the first one (so n-1 probabilities), and then find the perplexity of the sentence. There is a
+    # Huggingface implementation of GPT-2 that allows users to get the log probabilities of each token all at once,
+    # which is significantly faster than calculating each probability one token at a time. I could be wrong,
+    # but I believe the reason that we do not find the probability of the first token is that the Huggingface
+    # implementation does not use a start-of-sentence token. This means that the first word becomes the first token
+    # upon which the following words are conditioned.
+
+    # For the purpose of rewriting / translating sentences, using a stride of 1 is preferred. However, due to the
+    # fixed-length nature of certain models like GPT-2, if the input happens to be longer than the fixed length,
+    # calculating perplexity can be a bit tricky. The default approach is to split the input into segments less than
+    # or equal to the max fixed length, and then taking some kind of average of the perplexities. This is not a bad
+    # approach, but the start of each segment loses a considerable amount of context. This can lead to a higher
+    # perplexity than what is reflected in the text.
+
+    # One solution is to use a sliding window (up to size max fixed length). This means that we can use more context
+    # when calculating perplexity of tokens in situations where the input length is longer than our max fixed length.
+    # On top of this, we can add a stride option to calculate the perplexity every {stride} tokens instead of
+    # calculating perplexity for each token in the input. The sliding window with a larger stride is a nice
+    # compromise, allowing computation to proceed much faster while still giving the model a large context to make
+    # predictions at each step.
+
     encodings = tokenizer(sentence, return_tensors='pt')
 
     # can adjust stride based on size of input
