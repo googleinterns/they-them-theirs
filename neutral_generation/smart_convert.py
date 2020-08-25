@@ -4,7 +4,7 @@ import torch
 import spacy
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
-from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX
+from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX, NOUN
 from spacy.tokens import Token, Doc
 from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
 from constants import *
@@ -129,6 +129,16 @@ def simple_replace(token: Token):
                                          replacement='them')
         else:
             return None
+
+    # their vs theirs: https://ell.stackexchange.com/questions/18604/how-to-use-their-and-theirs
+    if text.lower() == 'his':
+        implied_head = (token.head.pos != NOUN)
+        if implied_head:
+            return capitalization_helper(original=text,
+                                         replacement='theirs')
+        else:
+            return capitalization_helper(original=text,
+                                         replacement='their')
 
     # use a lookup for direct mappings
     # e.g. he --> they, she --> they, policeman --> police officer
