@@ -6,9 +6,9 @@ neutral_generation/old_smart_convert.py
 neutral_generation/old_constants.py
 neutral_generation/old_score_smart_convert.py
 
-evaluation/test_set/old_generation.txt
-evaluation/test_set/jewang_generation.txt
-evaluation/test_set/generation.txt
+evaluation/gendered_test_set/old_generation.txt
+evaluation/gendered_test_set/jewang_generation.txt
+evaluation/gendered_test_set/generation.txt
 evaluation/calculate_metrics.py
 
 .idea
