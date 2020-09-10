@@ -2,6 +2,11 @@ import re
 import torch
 from string import punctuation
 
+# SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
+from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX, NOUN
+from spacy.tokens import Token, Doc
+from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
+
 from constants import *
 
 # direct replacement mapping
