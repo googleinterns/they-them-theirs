@@ -11,6 +11,8 @@ evaluation/gendered_test_set/jewang_generation.txt
 evaluation/gendered_test_set/generation.txt
 evaluation/calculate_metrics.py
 
+old_files
+
 .idea
 .DS_Store
 **/__pycache__
