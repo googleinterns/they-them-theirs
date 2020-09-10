@@ -1,0 +1,1 @@
+{"generation": {"bleu": 100.0, "word_error_rate": 0.0}, "jokes": {"bleu": 100.0, "word_error_rate": 0.0}, "movie_quotes": {"bleu": 100.0, "word_error_rate": 0.0}, "news_articles": {"bleu": 100.0, "word_error_rate": 0.0}, "reddit": {"bleu": 100.0, "word_error_rate": 0.0}, "twitter": {"bleu": 100.0, "word_error_rate": 0.0}}

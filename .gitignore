@@ -5,12 +5,13 @@ neutral_generation/jewang_neutral_converter.py
 neutral_generation/old_smart_convert.py
 neutral_generation/old_constants.py
 neutral_generation/old_score_smart_convert.py
-neutral_generation/sample_test_cases.py
 
-evaluation/test_set/old_generation.txt
-evaluation/test_set/jewang_generation.txt
-evaluation/test_set/generation.txt
+evaluation/gendered_test_set/old_generation.txt
+evaluation/gendered_test_set/jewang_generation.txt
+evaluation/gendered_test_set/generation.txt
 evaluation/calculate_metrics.py
+
+old_files
 
 .idea
 .DS_Store
