@@ -1,25 +1,42 @@
 import re
-import math
 import torch
-import spacy
+from string import punctuation
 
 # SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
 from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX, NOUN
 from spacy.tokens import Token, Doc
 from pytorch_pretrained_bert import OpenAIGPTTokenizer, OpenAIGPTLMHeadModel
+
 from constants import *
-
-nlp = spacy.load("en_core_web_sm")
-
-# Load pre-trained model (weights)
-model = OpenAIGPTLMHeadModel.from_pretrained('openai-gpt')
-model.eval()
-# Load pre-trained model tokenizer (vocabulary)
-tokenizer = OpenAIGPTTokenizer.from_pretrained('openai-gpt')
 
 # direct replacement mapping
 SIMPLE_REPLACE = EASY_PRONOUNS
 SIMPLE_REPLACE.update(GENDERED_TERMS)
+
+# load SpaCy's "en_core_web_sm" model
+# English multi-task CNN trained on OntoNotes
+# Assigns context-specific token vectors, POS tags, dependency parse and named entities
+# https://spacy.io/models/en
+import en_core_web_sm
+
+nlp = en_core_web_sm.load()
+
+# SpaCy: lowercase is for dependency parser, uppercase is for part-of-speech tagger
+from spacy.symbols import nsubj, nsubjpass, conj, poss, obj, iobj, pobj, dobj, VERB, AUX, NOUN
+from spacy.tokens import Token, Doc
+
+# Load pre-trained language model and tokenizer
+# https://huggingface.co/transformers/model_doc/gpt2.html
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
+
+model_id = 'gpt2'  # can also change to gpt-2 large if size is not an issue
+model = GPT2LMHeadModel.from_pretrained(model_id).to(device)
+tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
 
 
 def convert(sentence: str) -> str:
@@ -28,6 +45,10 @@ def convert(sentence: str) -> str:
     :param sentence: sentence meeting SNAPE criteria (meaning 1 entity and 1 gender)
     :return: sentence in gender-neutral form
     """
+
+    # check error case when input is a single word and the word is a non function pronoun
+    if sentence.strip(punctuation).strip().lower() in NON_FUNCTION_PRONOUNS.keys():
+        raise ValueError("Input is a pronoun with a one-to-many mapping. Insufficient context.")
 
     # use a LM to break ties for pronouns when there is a one-to-many mapping
     for word, choices in NON_FUNCTION_PRONOUNS.items():
@@ -64,7 +85,8 @@ def smart_pronoun_replace(sentence: str, token: str, choices: list) -> str:
     for choice in choices:
         new_sentence = regex_token_replace(sentence, token, replacement=choice)
         if sentence != new_sentence:
-            new_score = score(new_sentence)
+            new_score = score(sentence=new_sentence,
+                              stride=1)
             sentence_scores[new_sentence] = new_score
 
     if not sentence_scores:  # source pronoun not found in sentence, meaning there are no choices to choose from
@@ -91,16 +113,77 @@ def regex_token_replace(sentence: str, token: str, replacement: str) -> str:
     return sentence
 
 
-def score(sentence: str) -> float:
+def score(sentence: str, stride: int = 1) -> float:
     """
     score the perplexity of a sentence
     :param sentence: input sentence
+    :param stride: (optional) calculate perplexity for every {stride} tokens, can trade-off speed for accuracy
     :return: perplexity normalized by length of sentence (longer sentences won't have inherently have higher perplexity)
     """
-    tokenize_input = tokenizer.tokenize(sentence)
-    tensor_input = torch.tensor([tokenizer.convert_tokens_to_ids(tokenize_input)])
-    loss = model(tensor_input, lm_labels=tensor_input)
-    return math.exp(loss) / len(tokenize_input)  # normalize perplexity by number of tokens
+    # Tony's note about the sliding window implementation / stride parameter (08.21.2020):
+
+    # By default, the stride parameter is set to 1. This means that we find the average log probability of each token
+    # after the first one (so n-1 probabilities), and then find the perplexity of the sentence. There is a
+    # Huggingface implementation of GPT-2 that allows users to get the log probabilities of each token all at once,
+    # which is significantly faster than calculating each probability one token at a time. I could be wrong,
+    # but I believe the reason that we do not find the probability of the first token is that the Huggingface
+    # implementation does not use a start-of-sentence token. This means that the first word becomes the first token
+    # upon which the following words are conditioned.
+
+    # For the purpose of rewriting / translating sentences, using a stride of 1 is preferred. However, due to the
+    # fixed-length nature of certain models like GPT-2, if the input happens to be longer than the fixed length,
+    # calculating perplexity can be a bit tricky. The default approach is to split the input into segments less than
+    # or equal to the max fixed length, and then taking some kind of average of the perplexities. This is not a bad
+    # approach, but the start of each segment loses a considerable amount of context. This can lead to a higher
+    # perplexity than what is reflected in the text.
+
+    # One solution is to use a sliding window (up to size max fixed length). This means that we can use more context
+    # when calculating perplexity of tokens in situations where the input length is longer than our max fixed length.
+    # On top of this, we can add a stride option to calculate the perplexity every {stride} tokens instead of
+    # calculating perplexity for each token in the input. The sliding window with a larger stride is a nice
+    # compromise, allowing computation to proceed much faster while still giving the model a large context to make
+    # predictions at each step.
+
+    encodings = tokenizer(sentence, return_tensors='pt')
+
+    # can adjust stride based on size of input
+    # if (1) input is longer (e.g. document) or (2) we wish to have faster computation, we can set longer stride
+    # reference: https://huggingface.co/transformers/perplexity.html
+
+    if stride == 1:  # if stride is 1, just return average log prob of each token (no need to copy and mask)
+        input_ids = encodings.input_ids.to(device)
+        with torch.no_grad():  # don't need gradients for evaluation
+            outputs = model(input_ids, labels=input_ids)
+            return float(torch.exp(outputs[0]))  # outputs[0] is avg log prob
+
+    max_length = model.config.n_positions  # max length for gpt2-large and gpt is 1024
+    num_tokens = encodings.input_ids.size(1)  # usually punctuation will count as separate tokens
+
+    # calculate neg log prob for each token given context of previous tokens in the sentence
+    # if stride=1, context will be all previous tokens in sentence (assuming # of tokens < max_length)
+    log_probabilities = list()
+    for i in range(1, num_tokens, stride):
+        begin_loc = max(i + stride - max_length, 0)
+
+        # model is trained without a token indicating beginning of sentence, so we start calculation at second token
+        # this also means model cannot calculate perplexity for a single token (have added error checking for this case)
+        end_loc = i + stride
+
+        input_ids = encodings.input_ids[:, begin_loc:end_loc].to(device)
+        target_ids = input_ids.clone()
+        target_ids[:, :-stride] = -100  # mask prior tokens (the context) since we only care about current token
+
+        with torch.no_grad():  # don't need gradients for evaluation
+            outputs = model(input_ids, labels=target_ids)
+            log_prob = outputs[0] * stride
+
+        log_probabilities.append(log_prob)
+
+    # formula for perplexity
+    # dividing by (num_tokens - 1) because model does not calculate log prob for first token
+    perplexity = torch.exp(torch.stack(log_probabilities).sum() / (num_tokens - 1))
+
+    return float(perplexity)
 
 
 def simple_replace(token: Token):
@@ -283,8 +366,6 @@ def pluralize_present_simple(lowercase_verb: str):
     :param lowercase_verb: original verb (lower-cased)
     :return: 3rd-person plural verb in the present simple tense
     """
-    # TODO: pluralizing present tense can be tricky.
-    # Probably a good idea to write a script to test function, can easily get ground truth for evaluation
     for singular, plural in IRREGULAR_VERBS.items():
         if lowercase_verb == singular:
             return plural
@@ -292,6 +373,7 @@ def pluralize_present_simple(lowercase_verb: str):
     if lowercase_verb.endswith('ies'):
         return lowercase_verb[:-3] + 'y'
 
+    # -es rule: https://howtospell.co.uk/adding-es-plural-rule
     for suffix in VERB_ES_SUFFIXES:
         if lowercase_verb.endswith(suffix):
             return lowercase_verb[:-2]
@@ -307,7 +389,7 @@ def create_new_doc(doc: Doc, verbs_replacements: dict):
     create a new SpaCy doc using the original doc and a mapping of verbs to their replacements
     :param doc: original doc with simple_replace extension (from simple_replace function)
     :param verbs_replacements: dictionary mapping verbs and auxiliaries to their replacements
-    :return: the gender-neutral sentence as a SpaCy doc
+    :return: the gender-neutral sentence as a str
     """
     token_texts = []
     for token in doc:
