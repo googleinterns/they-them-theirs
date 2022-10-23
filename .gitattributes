@@ -1,4 +1,7 @@
-notebooks/* linguist-vendored
+notebooks/convert_runtime/* linguist-vendored
+notebooks/dataset_analysis/* linguist-vendored
+notebooks/generation_analysis/* linguist-vendored
+
 evaluation/challenge_set/* linguist-vendored
 evaluation/gendered_test_set/* linguist-vendored
 evaluation/nongendered_test_set/* linguist-vendored
